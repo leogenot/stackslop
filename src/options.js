@@ -9,11 +9,13 @@ const {
   linkTarget = "github",
   linearTab = "show",
   testsInDiff = "count",
-} = await chrome.storage.local.get(["token", "linkTarget", "linearTab", "testsInDiff"]);
+  collapseTests = "expand",
+} = await chrome.storage.local.get(["token", "linkTarget", "linearTab", "testsInDiff", "collapseTests"]);
 tokenInput.value = token ?? "";
 form.elements.linkTarget.value = linkTarget;
 form.elements.linearTab.value = linearTab;
 form.elements.testsInDiff.value = testsInDiff;
+form.elements.collapseTests.value = collapseTests;
 
 // Linear links always leave tests out, so the choice only matters for GitHub links.
 const testsField = document.getElementById("tests-field");
@@ -37,7 +39,7 @@ const save = async (changes) => {
 
 tokenInput.addEventListener("change", () => save({ token: tokenInput.value.trim() }));
 form.addEventListener("submit", (event) => event.preventDefault());
-for (const name of ["linkTarget", "linearTab", "testsInDiff"]) {
+for (const name of ["linkTarget", "linearTab", "testsInDiff", "collapseTests"]) {
   for (const radio of form.elements[name]) {
     radio.addEventListener("change", () => save({ [name]: radio.value }));
   }
