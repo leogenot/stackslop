@@ -38,6 +38,20 @@
           </p>
         </section>
 
+        <section class="field" id="tests-field">
+          <div class="field-head">
+            <span class="label" id="tests-label">Test files in the diff stat</span>
+          </div>
+          <div class="segmented" role="radiogroup" aria-labelledby="tests-label">
+            <label><input type="radio" name="testsInDiff" value="count" checked /><span>Count</span></label>
+            <label><input type="radio" name="testsInDiff" value="skip" /><span>Leave out</span></label>
+          </div>
+          <p class="hint">
+            Leaving them out drops <code>*.test.*</code>, <code>*.spec.*</code>, and files under <code>__tests__/</code>,
+            <code>test/</code>, <code>tests/</code> or <code>e2e/</code> from each PR’s <code>+/-</code> count.
+          </p>
+        </section>
+
         <section class="field">
           <div class="field-head">
             <span class="label" id="linear-tab-label">View in Linear tab</span>

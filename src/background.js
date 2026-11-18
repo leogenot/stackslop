@@ -1,4 +1,4 @@
-import { formatPrs, formatStack, linkFor } from "./format.js";
+import { formatPrs, formatStack, linkFor, skipsTests } from "./format.js";
 import { GitHubError, fetchPrWithStack, parsePrUrl } from "./github.js";
 import { fetchLinearUsers, linearWorkspaceOf, withLinearReviews } from "./linear.js";
 
@@ -18,13 +18,15 @@ const loadLinks = async (url) => {
   const ref = parsePrUrl(url);
   if (!ref) return { ok: false, message: "Not a pull request" };
 
-  const { token, linkTarget, linearTab } = await chrome.storage.local.get(["token", "linkTarget", "linearTab"]);
+  const settings = await chrome.storage.local.get(["token", "linkTarget", "linearTab", "testsInDiff"]);
+  const { token, linkTarget, linearTab } = settings;
   try {
     // The review lookup and the tab's check both need who's signed in to Linear, so ask once.
     let users;
     const linearUsers = () => (users ??= fetchLinearUsers());
     // O then L opens the Linear review whatever the settings, so always look for it.
-    const { pr, stack, stackFailed } = await withLinearReviews(ref, await fetchPrWithStack(ref, token), linearUsers);
+    const loaded = await fetchPrWithStack(ref, token, { skipTests: skipsTests(settings) });
+    const { pr, stack, stackFailed } = await withLinearReviews(ref, loaded, linearUsers);
     return {
       ok: true,
       pr: formatPrs([pr], linkTarget),

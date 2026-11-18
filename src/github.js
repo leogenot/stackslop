@@ -76,14 +76,38 @@ const withDetails = (pr, details) => ({
   linearUrl: details.get(pr.number)?.linearUrl ?? null,
 });
 
-export const fetchPr = async ({ owner, repo, number }, token) =>
-  toPr(await request(`/repos/${owner}/${repo}/pulls/${number}`, token));
+// *.test.*, *.spec.*, and anything under __tests__/, test/, tests/ or e2e/.
+const TEST_FILE = /\.(test|spec)\.[^/]+$|(^|\/)(__tests__|tests?|e2e)\//;
+
+// GitHub lists a PR's files 100 a page, and no more than 3000 in all.
+const fetchFiles = async ({ owner, repo, number }, token, count) => {
+  const pages = Math.min(Math.ceil(count / 100), 30);
+  const lists = await Promise.all(
+    Array.from({ length: pages }, (_, i) =>
+      request(`/repos/${owner}/${repo}/pulls/${number}/files?per_page=100&page=${i + 1}`, token),
+    ),
+  );
+  return lists.flat();
+};
+
+const sum = (files, key) => files.reduce((total, file) => total + file[key], 0);
+
+/**
+ * Loads a PR. With `skipTests`, its diff stat leaves out test files, which takes one more
+ * request per 100 files.
+ */
+export const fetchPr = async (ref, token, { skipTests = false } = {}) => {
+  const pr = await request(`/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`, token);
+  if (!skipTests) return toPr(pr);
+  const files = (await fetchFiles(ref, token, pr.changed_files)).filter((file) => !TEST_FILE.test(file.filename));
+  return { ...toPr(pr), additions: sum(files, "additions"), deletions: sum(files, "deletions") };
+};
 
 /**
  * Returns the GitHub stack containing the PR, as its trunk branch and its PRs top of the
  * stack first, or null when the PR isn't in a stack.
  */
-export const fetchStack = async ({ owner, repo, number }, token) => {
+export const fetchStack = async ({ owner, repo, number }, token, options) => {
   const stacks = await request(`/repos/${owner}/${repo}/stacks?pull_request=${number}`, token);
   const stack = stacks.find((s) => s.pull_requests.some((pr) => pr.number === number));
   if (!stack) return null;
@@ -91,7 +115,7 @@ export const fetchStack = async ({ owner, repo, number }, token) => {
   // The API lists PRs bottom first; Graphite pastes the top of the stack first.
   const numbers = stack.pull_requests.map((pr) => pr.number).reverse();
   const [prs, details] = await Promise.all([
-    Promise.all(numbers.map((n) => fetchPr({ owner, repo, number: n }, token))),
+    Promise.all(numbers.map((n) => fetchPr({ owner, repo, number: n }, token, options))),
     fetchPrDetails({ owner, repo }, numbers, token).catch(() => new Map()),
   ]);
   return { trunk: stack.base.ref, prs: prs.map((pr) => withDetails(pr, details)) };
@@ -99,14 +123,14 @@ export const fetchStack = async ({ owner, repo, number }, token) => {
 
 /**
  * Loads the PR and, when it sits in a stack of two or more PRs, that stack. `stackFailed`
- * tells a stack that couldn't load apart from a PR that has none.
+ * tells a stack that couldn't load apart from a PR that has none. `options` go to fetchPr.
  */
-export const fetchPrWithStack = async (ref, token) => {
+export const fetchPrWithStack = async (ref, token, options) => {
   const [pr, details, stack] = await Promise.all([
-    fetchPr(ref, token),
+    fetchPr(ref, token, options),
     fetchPrDetails(ref, [ref.number], token).catch(() => new Map()),
     // A missing stack must not block copying the PR itself. A 404 means the repo has no stacks.
-    fetchStack(ref, token).catch((error) => (error.status === 404 ? null : undefined)),
+    fetchStack(ref, token, options).catch((error) => (error.status === 404 ? null : undefined)),
   ]);
   return {
     pr: withDetails(pr, details),

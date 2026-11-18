@@ -1,4 +1,4 @@
-import { formatPrs, formatStack, stackNote } from "./format.js";
+import { formatPrs, formatStack, skipsTests, stackNote } from "./format.js";
 import { GitHubError, fetchPrWithStack, parsePrUrl } from "./github.js";
 import { withLinearReviews } from "./linear.js";
 
@@ -95,8 +95,9 @@ const main = async () => {
     return;
   }
 
-  const { token, linkTarget } = await chrome.storage.local.get(["token", "linkTarget"]);
-  const loaded = await fetchPrWithStack(ref, token);
+  const settings = await chrome.storage.local.get(["token", "linkTarget", "testsInDiff"]);
+  const { token, linkTarget } = settings;
+  const loaded = await fetchPrWithStack(ref, token, { skipTests: skipsTests(settings) });
   const { pr, stack } = linkTarget === "linear" ? await withLinearReviews(ref, loaded) : loaded;
 
   const hasStack = stack !== null;

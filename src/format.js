@@ -25,6 +25,12 @@ const label = (pr) => `#${pr.number} ${pr.title}`;
  */
 export const linkFor = (pr, target) => (target === "linear" && pr.linearUrl) || pr.url;
 
+/**
+ * Whether the diff stat leaves out test files: always with Linear links, since Linear's
+ * review does, and with GitHub links when the setting says so.
+ */
+export const skipsTests = ({ linkTarget, testsInDiff }) => linkTarget === "linear" || testsInDiff === "skip";
+
 const prHtml = (pr, target) =>
   `<a href="${escapeHtml(linkFor(pr, target))}">${escapeHtml(label(pr))}</a> <code>${diffStat(pr)}</code>`;
 
