@@ -1,3 +1,5 @@
+import "./test-files.js";
+
 const API = "https://api.github.com";
 
 export class GitHubError extends Error {
@@ -29,6 +31,15 @@ const request = async (path, token, init = {}) => {
   return response.json();
 };
 
+const graphql = async (query, variables, token) => {
+  const { data, errors } = await request("/graphql", token, {
+    method: "POST",
+    body: JSON.stringify({ query, variables }),
+  });
+  if (errors) throw new GitHubError(200, errors[0].message);
+  return data;
+};
+
 const toPr = (pr) => ({
   number: pr.number,
   title: pr.title,
@@ -52,14 +63,11 @@ const fetchPrDetails = async ({ owner, repo }, numbers, token) => {
   const fields = numbers
     .map((n) => `pr${n}: pullRequest(number: ${n}) { reviewDecision comments(first: 30) { nodes { body } } }`)
     .join(" ");
-  const { data, errors } = await request("/graphql", token, {
-    method: "POST",
-    body: JSON.stringify({
-      query: `query($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) { ${fields} } }`,
-      variables: { owner, repo },
-    }),
-  });
-  if (errors) throw new GitHubError(200, errors[0].message);
+  const data = await graphql(
+    `query($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) { ${fields} } }`,
+    { owner, repo },
+    token,
+  );
   return new Map(
     numbers.map((n) => {
       const pr = data.repository[`pr${n}`];
@@ -75,9 +83,6 @@ const withDetails = (pr, details) => ({
   review: details.get(pr.number)?.review ?? null,
   linearUrl: details.get(pr.number)?.linearUrl ?? null,
 });
-
-// *.test.*, *.spec.*, and anything under __tests__/, test/, tests/ or e2e/.
-const TEST_FILE = /\.(test|spec)\.[^/]+$|(^|\/)(__tests__|tests?|e2e)\//;
 
 // GitHub lists a PR's files 100 a page, and no more than 3000 in all.
 const fetchFiles = async ({ owner, repo, number }, token, count) => {
@@ -99,8 +104,53 @@ const sum = (files, key) => files.reduce((total, file) => total + file[key], 0);
 export const fetchPr = async (ref, token, { skipTests = false } = {}) => {
   const pr = await request(`/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`, token);
   if (!skipTests) return toPr(pr);
-  const files = (await fetchFiles(ref, token, pr.changed_files)).filter((file) => !TEST_FILE.test(file.filename));
+  const files = (await fetchFiles(ref, token, pr.changed_files)).filter((file) => !isTestFile(file.filename));
   return { ...toPr(pr), additions: sum(files, "additions"), deletions: sum(files, "deletions") };
+};
+
+const FILES_QUERY = `query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      id
+      files(first: 100, after: $after) { nodes { path viewerViewedState } pageInfo { hasNextPage endCursor } }
+    }
+  }
+}`;
+
+const fetchViewedStates = async ({ owner, repo, number }, token) => {
+  const files = [];
+  let after = null;
+  let id;
+  do {
+    const { pullRequest } = (await graphql(FILES_QUERY, { owner, repo, number, after }, token)).repository;
+    id = pullRequest.id;
+    files.push(...pullRequest.files.nodes);
+    after = pullRequest.files.pageInfo.hasNextPage ? pullRequest.files.pageInfo.endCursor : null;
+  } while (after);
+  return { id, files };
+};
+
+const MARKS_PER_REQUEST = 50;
+
+/**
+ * Marks the PR's unviewed test files as viewed for the token's owner, and returns how many
+ * it marked.
+ */
+export const markTestFilesViewed = async (ref, token) => {
+  const { id, files } = await fetchViewedStates(ref, token);
+  const paths = files
+    .filter((file) => file.viewerViewedState !== "VIEWED" && isTestFile(file.path))
+    .map((file) => file.path);
+  for (let start = 0; start < paths.length; start += MARKS_PER_REQUEST) {
+    const batch = paths.slice(start, start + MARKS_PER_REQUEST);
+    const params = batch.map((_, i) => `$path${i}: String!`).join(", ");
+    const marks = batch
+      .map((_, i) => `mark${i}: markFileAsViewed(input: { pullRequestId: $id, path: $path${i} }) { clientMutationId }`)
+      .join(" ");
+    const variables = Object.fromEntries(batch.map((path, i) => [`path${i}`, path]));
+    await graphql(`mutation($id: ID!, ${params}) { ${marks} }`, { id, ...variables }, token);
+  }
+  return paths.length;
 };
 
 /**

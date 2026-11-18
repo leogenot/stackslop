@@ -1,5 +1,5 @@
 import { formatPrs, formatStack, linkFor, skipsTests } from "./format.js";
-import { GitHubError, fetchPrWithStack, parsePrUrl } from "./github.js";
+import { GitHubError, fetchPrWithStack, markTestFilesViewed, parsePrUrl } from "./github.js";
 import { fetchLinearUsers, linearWorkspaceOf, withLinearReviews } from "./linear.js";
 
 /**
@@ -11,6 +11,11 @@ const linearTabUrlFor = async (linearUrl, linearTab, linearUsers) => {
   // The tab is worth more than the check, so show it when Linear can't be asked.
   const users = await linearUsers().catch(() => null);
   return !users || users.some((user) => user.workspace === linearWorkspaceOf(linearUrl)) ? linearUrl : null;
+};
+
+const failure = (error) => {
+  const needsToken = error instanceof GitHubError && [401, 403, 404].includes(error.status);
+  return { ok: false, needsToken, message: error.message };
 };
 
 // Fetches for the in-page buttons, so the token never reaches github.com's page context.
@@ -45,14 +50,28 @@ const loadLinks = async (url) => {
       },
     };
   } catch (error) {
-    const needsToken = error instanceof GitHubError && [401, 403, 404].includes(error.status);
-    return { ok: false, needsToken, message: error.message };
+    return failure(error);
+  }
+};
+
+const markTestsViewed = async (url) => {
+  const ref = parsePrUrl(url);
+  if (!ref) return { ok: false, message: "Not a pull request" };
+  const { token } = await chrome.storage.local.get("token");
+  try {
+    return { ok: true, marked: await markTestFilesViewed(ref, token) };
+  } catch (error) {
+    return failure(error);
   }
 };
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "load-links") {
     loadLinks(message.url).then(sendResponse);
+    return true;
+  }
+  if (message.type === "mark-tests-viewed") {
+    markTestsViewed(message.url).then(sendResponse);
     return true;
   }
   if (message.type === "open-options") chrome.runtime.openOptionsPage();

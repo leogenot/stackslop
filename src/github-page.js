@@ -1,6 +1,7 @@
 // Adds "Copy link" and "Copy stack" buttons to GitHub PR pages: in the header, and next
 // to the merge button. A PR that Linear has linked also gets a "View in Linear" tab, and O
-// then L opens it.
+// then L opens it. The diff page gets a "Mark tests viewed" button by its viewed files
+// count, and can start with test files collapsed.
 
 const LINEAR_ICON =
   '<svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"></path></svg>';
@@ -73,6 +74,101 @@ const syncLinearTab = () => {
   filesItem.parentElement.append(tab);
 };
 
+const isDiffPage = () => /^\/[^/]+\/[^/]+\/pull\/\d+\/(changes|files)/.test(location.pathname);
+
+const markTestsViewed = async (button) => {
+  button.disabled = true;
+  const result = await Promise.resolve()
+    .then(() => chrome.runtime.sendMessage({ type: "mark-tests-viewed", url: button.dataset.url }))
+    .catch((error) => ({
+      ok: false,
+      message: chrome.runtime?.id ? error.message : "Stackslop was updated, so reload the page",
+    }));
+  button.disabled = false;
+  if (result.needsToken) return chrome.runtime.sendMessage({ type: "open-options" });
+  if (!result.ok) return toast("failed", `Couldn't mark tests viewed: ${result.message}`);
+  if (result.marked === 0) return toast("copied", "No unviewed test files");
+  location.reload();
+};
+
+const createMarkTestsButton = (url) => {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "stackslop-button stackslop-mark-tests";
+  button.dataset.url = url;
+  button.innerHTML = `${CHECK_ICON}<span>Mark tests viewed</span>`;
+  button.addEventListener("click", () => markTestsViewed(button));
+  return button;
+};
+
+const DIFF_TOOLBAR_END = '[data-testid="diff-content"] > section > :last-child';
+
+const syncMarkTestsButton = () => {
+  const url = isDiffPage() && currentPrUrl();
+  const existing = document.querySelector(".stackslop-mark-tests");
+  const toolbarEnd = url && document.querySelector(DIFF_TOOLBAR_END);
+  if (!toolbarEnd) return existing?.remove();
+
+  const current = existing?.dataset.url === url;
+  if (current && toolbarEnd.firstElementChild === existing) return;
+  if (!current) existing?.remove();
+  toolbarEnd.prepend(current ? existing : createMarkTestsButton(url));
+};
+
+const COLLAPSE_RETRY_MS = 500;
+const MAX_COLLAPSE_CLICKS = 10;
+const handledDiffs = new Set();
+const collapseClicks = new Map();
+let collapseRetry = null;
+let collapsesTests = false;
+let collapsePage = null;
+
+const filePathOf = (diff) => diff.querySelector("h3 code")?.textContent.replace(/\u200e/g, "").trim();
+
+const tooltipOf = (button) => document.getElementById(button?.getAttribute("aria-labelledby"))?.textContent.trim();
+
+const collapseTestFiles = () => {
+  const page = collapsesTests && isDiffPage() ? location.pathname : null;
+  if (page !== collapsePage) {
+    collapsePage = page;
+    handledDiffs.clear();
+    collapseClicks.clear();
+  }
+  if (!page) return;
+  let waiting = false;
+  for (const diff of document.querySelectorAll('[data-testid="progressive-diffs-list"] [role="region"][id^="diff-"]')) {
+    if (handledDiffs.has(diff.id)) continue;
+    const path = filePathOf(diff);
+    const toggle = diff.querySelector("[data-diff-header-wrapper] button[aria-labelledby]");
+    const tooltip = tooltipOf(toggle);
+    if (!path || !tooltip) continue;
+
+    const clicks = collapseClicks.get(diff.id) ?? { count: 0, at: 0 };
+    if (!isTestFile(path) || tooltip !== "Collapse file" || clicks.count >= MAX_COLLAPSE_CLICKS) {
+      handledDiffs.add(diff.id);
+      collapseClicks.delete(diff.id);
+      continue;
+    }
+    waiting = true;
+    if (Date.now() - clicks.at < COLLAPSE_RETRY_MS) continue;
+    collapseClicks.set(diff.id, { count: clicks.count + 1, at: Date.now() });
+    toggle.click();
+  }
+  if (!waiting || collapseRetry) return;
+  collapseRetry = setTimeout(() => {
+    collapseRetry = null;
+    collapseTestFiles();
+  }, COLLAPSE_RETRY_MS);
+};
+
+chrome.storage.local.get("collapseTests").then(({ collapseTests }) => {
+  collapsesTests = collapseTests === "collapse";
+  collapseTestFiles();
+});
+chrome.storage.onChanged.addListener((changes) => {
+  if (changes.collapseTests) collapsesTests = changes.collapseTests.newValue === "collapse";
+});
+
 linksListeners.add((url, result) => {
   if (!result.ok || linearUrls.get(url) === result.linearTabUrl) return;
   linearUrls.set(url, result.linearTabUrl);
@@ -81,7 +177,11 @@ linksListeners.add((url, result) => {
 
 start({
   currentPrUrl,
-  onSync: syncLinearTab,
+  onSync: () => {
+    syncLinearTab();
+    syncMarkTestsButton();
+    collapseTestFiles();
+  },
   opens: { l: { name: "Linear review", pick: (result) => result.linearUrl } },
   spots: {
     header: () => {

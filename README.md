@@ -51,6 +51,10 @@ Linear review instead. <kbd>C</kbd> <kbd>G</kbd> still copies the GitHub link.
 files under `__tests__/`, `test/`, `tests/` or `e2e/`, as Linear's review does. With GitHub
 links, set **Test files in the diff stat** to **Leave out** in the options for the same count.
 
+On a PR's **Files changed** page, **Mark tests viewed** by the viewed files count marks
+every test file as viewed, by the same rules, then reloads the page. It needs a token. Set
+**Test files on Files changed** to **Collapsed** in the options to start them closed there.
+
 A PR with a Linear review also gets a **View in Linear** tab after **Files changed**, when
 the review is in a Linear workspace you're signed in to in this browser. Turn it off in the
 options.

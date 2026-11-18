@@ -54,6 +54,17 @@
 
         <section class="field">
           <div class="field-head">
+            <span class="label" id="collapse-tests-label">Test files on Files changed</span>
+          </div>
+          <div class="segmented" role="radiogroup" aria-labelledby="collapse-tests-label">
+            <label><input type="radio" name="collapseTests" value="expand" checked /><span>Expanded</span></label>
+            <label><input type="radio" name="collapseTests" value="collapse" /><span>Collapsed</span></label>
+          </div>
+          <p class="hint">Collapsed starts each test file closed on a PR’s Files changed page. Open one and it stays open.</p>
+        </section>
+
+        <section class="field">
+          <div class="field-head">
             <span class="label" id="linear-tab-label">View in Linear tab</span>
           </div>
           <div class="segmented" role="radiogroup" aria-labelledby="linear-tab-label">

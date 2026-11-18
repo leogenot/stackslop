@@ -114,3 +114,8 @@
 .stackslop-linear-tab svg {
   vertical-align: text-bottom;
 }
+
+.stackslop-mark-tests:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
